@@ -163,6 +163,8 @@ mongoc_stream_tls_new_with_hostname(mongoc_stream_t *base_stream, const char *ho
    return mongoc_stream_tls_secure_transport_new(base_stream, host, opt, client);
 #elif defined(MONGOC_ENABLE_SSL_SECURE_CHANNEL)
    return mongoc_stream_tls_secure_channel_new(base_stream, host, opt, client);
+#elif defined(MONGOC_ENABLE_SSL_RUST)
+   BSON_UNREACHABLE("mongoc-rust");
 #else
 #error "Don't know how to create TLS stream"
 #endif
