@@ -97,6 +97,7 @@ mongo_bool_setting(ENABLE_MAN_PAGES "Enable building the manual pages" DEFAULT V
 mongo_bool_setting(ENABLE_HTML_DOCS "Enable building the HTML documentation" DEFAULT VALUE OFF)
 mongo_bool_setting(ENABLE_UNINSTALL "Generate an 'uninstall' script and an 'uninstall' build target")
 mongo_bool_setting(ENABLE_SRV "Enable support for mongodb+srv URIs.")
+mongo_bool_setting(ENABLE_RUST "Enable support for wrapping the Rust driver" DEFAULT VALUE ON)
 
 # Optional features that are ENABLED when necessary dependencies are found:
 mongo_setting(ENABLE_SNAPPY "Enable Snappy compression support"
@@ -407,6 +408,10 @@ if (MSVC)
    list (APPEND CMAKE_REQUIRED_DEFINITIONS -D_CRT_SECURE_NO_WARNINGS)
 endif ()
 
+if (ENABLE_RUST)
+   add_subdirectory (src/rust)
+endif ()
+
 if (ENABLE_MONGOC)
    if (ENABLE_TESTS AND NOT MONGOC_ENABLE_STATIC_BUILD)
       message (FATAL_ERROR "ENABLE_TESTS requires ENABLE_STATIC or ENABLE_STATIC_BUILD")
@@ -424,7 +429,9 @@ if (ENABLE_MONGOC)
    endif ()
    set (MONGOC_ENABLE_MONGODB_AWS_AUTH 0)
    if (ENABLE_MONGODB_AWS_AUTH STREQUAL "AUTO")
-      if (MSVC AND MSVC_VERSION LESS 1900)
+      if (ENABLE_RUST)
+         message (STATUS "Building with MONGODB-AWS auth support (RUST)")
+      elseif (MSVC AND MSVC_VERSION LESS 1900)
          message (WARNING "MS Visual Studio too old for ENABLE_MONGODB_AWS_AUTH")
       elseif (NOT ENABLE_SSL)
             message (WARNING

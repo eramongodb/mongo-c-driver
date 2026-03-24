@@ -99,5 +99,7 @@ _mongoc_cluster_auth_node_sasl(mongoc_cluster_t *cluster,
    return _mongoc_cluster_auth_node_cyrus(cluster, stream, sd, error);
 #elif defined(MONGOC_ENABLE_SASL_SSPI)
    return _mongoc_cluster_auth_node_sspi(cluster, stream, sd, error);
+#elif defined(MONGOC_ENABLE_SASL_RUST)
+   BSON_UNREACHABLE("mongoc-rust");
 #endif
 }

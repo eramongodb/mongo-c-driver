@@ -36,6 +36,7 @@ endif()
 
 # Definition for mongoc-config.h:
 mongo_pick(MONGOC_ENABLE_SRV 1 0 ENABLE_SRV)
+mongo_pick(MONGOC_ENABLE_RUST 1 0 ENABLE_RUST)
 
 set (MONGOC_OUTPUT_BASENAME "mongoc" CACHE STRING "Output mongoc library base name")
 
@@ -186,7 +187,9 @@ endfunction()
 
 # Attempt to automatically find and use a TLS library for the current platform
 function(_auto_pick_tls_lib)
-   if(WIN32)
+   if(ENABLE_RUST)
+      _use_named_tls_lib(RUST)
+   elseif(WIN32)
       # Windows has SecureChannel
       _use_named_tls_lib(WINDOWS)
    elseif(APPLE)
@@ -202,6 +205,8 @@ function(_auto_pick_tls_lib)
 endfunction()
 
 # Per-backend link libs/options:
+set(RUST/LINK_LIBRARIES)
+set(RUST/pkg_config_LIBS)
 set(SecureTransport/LINK_LIBRARIES "-framework CoreFoundation" "-framework Security")
 set(SecureTransport/pkg_config_LIBS -framework Corefoundation -framework Security)
 set(SecureChannel/LINK_LIBRARIES secur32.lib crypt32.lib Bcrypt.lib ncrypt.lib)
@@ -213,7 +218,9 @@ set(OpenSSL/pkg_config_LIBS -lssl -lcrypto $<$<PLATFORM_ID:Windows>:crypt32.lib>
 function(_use_named_tls_lib libname)
    # Use this property to track what package we import for our TLS libraries:
    set_property(DIRECTORY PROPERTY _mongoc-tls-package NO)
-   if(libname STREQUAL "OPENSSL")
+   if(libname STREQUAL "RUST")
+      set(backend RUST)
+   elseif(libname STREQUAL "OPENSSL")
       find_package(OpenSSL REQUIRED)
       set(backend OpenSSL)
       set_property(DIRECTORY PROPERTY _mongoc-tls-package OpenSSL)
@@ -250,11 +257,13 @@ mongo_bool01(MONGOC_ENABLE_SSL [[TLS_BACKEND]])
 mongo_bool01(MONGOC_ENABLE_SSL_SECURE_CHANNEL [[TLS_BACKEND STREQUAL "SecureChannel"]])
 mongo_bool01(MONGOC_ENABLE_SSL_SECURE_TRANSPORT [[TLS_BACKEND STREQUAL "SecureTransport"]])
 mongo_bool01(MONGOC_ENABLE_SSL_OPENSSL [[TLS_BACKEND STREQUAL "OpenSSL"]])
+mongo_bool01(MONGOC_ENABLE_SSL_RUST [[TLS_BACKEND STREQUAL "RUST"]])
 
 mongo_bool01(MONGOC_ENABLE_CRYPTO [[TLS_BACKEND]])
 mongo_bool01(MONGOC_ENABLE_CRYPTO_LIBCRYPTO [[MONGOC_ENABLE_SSL_OPENSSL]])
 mongo_bool01(MONGOC_ENABLE_CRYPTO_CNG [[MONGOC_ENABLE_SSL_SECURE_CHANNEL]])
 mongo_bool01(MONGOC_ENABLE_CRYPTO_COMMON_CRYPTO [[MONGOC_ENABLE_SSL_SECURE_TRANSPORT]])
+mongo_bool01(MONGOC_ENABLE_CRYPTO_RUST [[MONGOC_ENABLE_SSL_RUST]])
 mongo_bool01(MONGOC_ENABLE_CRYPTO_SYSTEM_PROFILE [[ENABLE_CRYPTO_SYSTEM_PROFILE]])
 add_feature_info("TLS" "${MONGOC_ENABLE_SSL}" "for secure network communication (${TLS_BACKEND})")
 add_feature_info("Cryptography" "${MONGOC_ENABLE_CRYPTO}" "cryptographic primitives (${TLS_BACKEND})")
@@ -310,7 +319,9 @@ endif()
 
 function(_pick_sasl sasl)
    if(sasl STREQUAL "AUTO")
-      if(WIN32)
+      if(ENABLE_RUST)
+         _use_sasl("RUST")
+      elseif(WIN32)
          # On Windows: Use SSPI
          _use_sasl("SSPI")
       else()
@@ -337,7 +348,9 @@ function(_use_sasl libname)
    set_property(TARGET _mongoc-sasl_backend PROPERTY EXPORT_NAME detail::c_sasl_backend)
    target_link_libraries(_mongoc-dependencies INTERFACE _mongoc-sasl_backend)
    install(TARGETS _mongoc-sasl_backend EXPORT mongoc-targets)
-   if(libname STREQUAL "SSPI")
+   if(libname STREQUAL "RUST")
+      set(backend "RUST")
+   elseif(libname STREQUAL "SSPI")
       target_link_libraries(_mongoc-sasl_backend INTERFACE secur32.lib crypt32.lib Shlwapi.lib)
       set(backend "SSPI")
    elseif(libname STREQUAL "CYRUS")
@@ -373,9 +386,10 @@ if(SASL_BACKEND STREQUAL "Cyrus")
 endif()
 
 mongo_bool01(MONGOC_HAVE_SASL_CLIENT_DONE [[SASL2_HAVE_SASL_CLIENT_DONE]])
+mongo_bool01(MONGOC_ENABLE_SASL_RUST [[SASL_BACKEND STREQUAL "RUST"]])
 mongo_bool01(MONGOC_ENABLE_SASL_SSPI [[SASL_BACKEND STREQUAL "SSPI"]])
 mongo_bool01(MONGOC_ENABLE_SASL_CYRUS [[SASL_BACKEND STREQUAL "Cyrus"]])
-mongo_bool01(MONGOC_ENABLE_SASL [[MONGOC_ENABLE_SASL_SSPI OR MONGOC_ENABLE_SASL_CYRUS]])
+mongo_bool01(MONGOC_ENABLE_SASL [[MONGOC_ENABLE_SASL_RUST OR MONGOC_ENABLE_SASL_SSPI OR MONGOC_ENABLE_SASL_CYRUS]])
 add_feature_info(
    "SASL Authentication"
    "${MONGOC_ENABLE_SASL}"
@@ -671,6 +685,8 @@ set (MONGOC_SOURCES
    ${PROJECT_SOURCE_DIR}/src/mongoc/mongoc-openssl.c
    ${PROJECT_SOURCE_DIR}/src/mongoc/mongoc-ocsp-cache.c
    ${PROJECT_SOURCE_DIR}/src/mongoc/mongoc-bulkwrite.c
+
+   ${PROJECT_SOURCE_DIR}/src/mongoc/mongoc-rand-rust.c
 )
 
 if (MONGOC_ENABLE_SASL)
@@ -803,7 +819,13 @@ if(ENABLE_SRV)
    target_link_libraries(_mongoc-dependencies INTERFACE mongo::detail::c_resolve)
 endif()
 
-if (MONGOC_ENABLE_MONGODB_AWS_AUTH)
+# mongoc-rust
+if(ENABLE_RUST)
+   target_link_libraries(_mongoc-dependencies INTERFACE $<BUILD_INTERFACE:mongoc-rust>)
+endif()
+
+# kms-message library is not required when mongoc-rust is enabled.
+if (MONGOC_ENABLE_MONGODB_AWS_AUTH AND NOT ENABLE_RUST)
    set (KMS_MSG_SOURCES
       ${mongo-c-driver_SOURCE_DIR}/src/kms-message/src/hexlify.c
       ${mongo-c-driver_SOURCE_DIR}/src/kms-message/src/kms_b64.c
@@ -1160,6 +1182,10 @@ set (test-libmongoc-sources
    ${PROJECT_SOURCE_DIR}/tests/unified/test-diagnostics.c
    ${PROJECT_SOURCE_DIR}/tests/unified/util.c
 )
+
+if (ENABLE_RUST)
+   list (APPEND test-libmongoc-sources ${PROJECT_SOURCE_DIR}/tests/test-mongoc-rust.c)
+endif ()
 
 if (MONGOC_ENABLE_SSL)
    set (test-libmongoc-sources ${test-libmongoc-sources}
