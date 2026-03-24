@@ -8,3 +8,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 mongodb = {version = "3.5.0", features = ["bson-3"]}
+tokio = "1.49.0"
